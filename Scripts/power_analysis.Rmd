@@ -1,0 +1,213 @@
+---
+title: "Creating test data for preregistration"
+output: html_notebook
+---
+
+
+```{r setup}
+library(tidyverse)
+library(fabricatr)
+```
+
+##Generate fake data
+
+```{r}
+simple_random_assignment_step <- 
+  declare_assignment(Z = complete_ra(800, prob = 0.5),
+                     Z_cond_prob = obtain_condition_probabilities(Z, declaration = declare_ra(N, prob = 0.5)))
+
+
+set.seed(6823)
+
+us_survey_fake <- fabricate(
+  N = 800,
+  self_efficacy = round(pmin(
+      pmax(rnorm(N,
+           mean = 10,
+           sd = 3), 0),
+            20)), 
+    partisan_pol = round(pmin(
+      pmax(rnorm(N,
+           mean = 4,
+           sd = 3), 0),
+            9)),
+    partisan_id = round(pmin(
+      pmax(rnorm(N,
+           mean = 10,
+           sd = 3), 0),
+            20)),
+     sys_just = round(pmin(
+      pmax(rnorm(N,
+           mean = 10,
+           sd = 3), 0),
+            20)),
+    trust_courts = round(pmin(
+      pmax(rnorm(N,
+           mean = 2,
+           sd = 1), 0),
+            4)),
+    pers_fin = round(pmin(
+      pmax(rnorm(N,
+           mean = 1,
+           sd = .5), 0),
+            2)),
+    rep_effic = round(pmin(
+      pmax(rnorm(N,
+           mean = 7,
+           sd = 2), 0),
+            12)),
+    treatment = draw_binary(prob = 0.5, N = 800),
+    anger_index =  round(pmin(
+      pmax(rnorm(N,
+           mean = 4,
+           sd = 1) + 1*treatment + .05*treatment*self_efficacy, 0),  #Adds a treatment effect
+            6)),
+   ca_index =  round(pmin(
+      pmax(rnorm(N,
+           mean = 8,
+           sd = 1) + 1*treatment + .05*treatment*self_efficacy, 0),  #Adds a treatment effect
+            16))
+)
+
+##Transforming CA index
+
+us_survey_fake <- us_survey_fake %>% mutate(ca_index_div = scale(ca_index / 4))
+
+##Ordered logit vs. lm
+
+summary(lm(anger_index ~ treatment + self_efficacy + treatment*self_efficacy, data = us_survey_fake))
+library(MASS)
+m <- polr(as.factor(anger_index) ~ treatment + self_efficacy + treatment*self_efficacy, data = us_survey_fake, Hess=TRUE)
+summary(m)
+
+
+##Centering and scaling first
+
+us_survey_fake <- us_survey_fake %>% mutate(anger_index_center = scale(anger_index))
+summary(lm(anger_index_center ~ treatment + self_efficacy + treatment*self_efficacy, data = us_survey_fake))
+m2 <- polr(as.factor(anger_index_center) ~ treatment + self_efficacy + treatment*self_efficacy, data = us_survey_fake, Hess=TRUE)
+summary(m2)
+
+## CA index
+summary(lm(ca_index_div ~ treatment + self_efficacy + treatment*self_efficacy, data = us_survey_fake))
+m3 <- polr(as.factor(ca_index) ~ treatment + self_efficacy + treatment*self_efficacy, data = us_survey_fake, Hess=TRUE)
+summary(m3)
+
+set.seed(274)
+
+us_survey_fake <- simple_random_assignment_step(us_survey_fake)  #Assigns treatment
+
+
+design <- 
+  declare_model(
+     N = 800,
+    group_efficacy_rep = round(pmin(
+    pmax(rnorm(N,
+               mean = 7,
+                             sd = 3), 0),
+    12)),
+  self_efficacy = round(pmin(
+    pmax(rnorm(N,
+               mean = 10,
+                             sd = 3), 0),
+    20)), 
+    potential_outcomes(Y ~ 0.25 + Z*group_efficacy_rep + Z + group_efficacy_rep) +
+   declare_inquiry(ATE = mean(Y_Z_1 - Y_Z_0)) +
+   declare_assignment(Z = complete_ra(800, prob = 0.5),
+                     Z_cond_prob = obtain_condition_probabilities(Z, declaration = declare_ra(N, prob = 0.5))) +
+  declare_measurement(Y = reveal_outcomes(Y ~ Z)) +
+  declare_estimator(Y ~ Z, inquiry = "ATE"))
+draw_estimands(design)
+```
+
+
+```{r}
+design <- 
+  declare_model(
+    N = 1200,
+    U = rnorm(N),
+    potential_outcomes(Y ~ 0.25 * Z + U)
+  ) + NULL
+```
+
+
+
+```{r}
+set.seed(35482)
+design <-
+  declare_population(
+    N = N,
+    self_efficacy = round(pmin(
+      pmax(rnorm(N,
+           mean = 10,
+           sd = 3), 0),
+            20)), 
+    partisan_pol = round(pmin(
+      pmax(rnorm(N,
+           mean = 4,
+           sd = 3), 0),
+            9)),
+    partisan_id = round(pmin(
+      pmax(rnorm(N,
+           mean = 10,
+           sd = 3), 0),
+            20)),
+     sys_just = round(pmin(
+      pmax(rnorm(N,
+           mean = 10,
+           sd = 3), 0),
+            20)),
+    trust_courts = round(pmin(
+      pmax(rnorm(N,
+           mean = 2,
+           sd = 1), 0),
+            4)),
+    pers_fin = round(pmin(
+      pmax(rnorm(N,
+           mean = 1,
+           sd = .5), 0),
+            2)),
+    rep_effic = round(pmin(
+      pmax(rnorm(N,
+           mean = 7,
+           sd = 2), 0),
+            12)),
+    U = rnorm(N, sd = 0.55)
+  ) +
+  declare_potential_outcomes(Y ~ 0.05 * Z + 0.1 * self_efficacy + .2 * partisan_pol + 0.05 * self_efficacy * Z +
+                             .2*partisan_id  - .1*Z*partisan_id  -  .1*sys_just + .05*sys_just*Z + .1*rep_effic -.2*pers_fin -
+                               .1*trust_courts - .1*Z*trust_courts  + U) +
+  declare_inquiry(ATE = mean(Y_Z_1 - Y_Z_0), interaction = 0.05) +
+  declare_assignment(Z = conduct_ra(N = N, prob = 0.5)) +
+  declare_reveal(Y, Z) +
+  declare_estimator(
+    Y ~ Z + self_efficacy + Z * self_efficacy + partisan_pol + pers_fin + sys_just,
+    .method = lm_robust,
+    term = c("Z", "Z:self_efficacy"),
+    inquiry = c("ATE", "interaction")
+  )
+
+designs <- redesign(design, N = c(400, 800, 1000, 1200))
+simulations <- simulate_design(designs, sims = 500)
+
+summary_df <-
+  simulations %>%
+  group_by(N, inquiry) %>%
+  summarize(power = mean(p.value <= 0.05),
+            mean_estimate = mean(estimate))  
+
+ggplot(summary_df, aes(N, power, group = inquiry, color = inquiry)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(yintercept = 0.8) +
+  theme_bw()
+
+
+
+```
+
+```{r}
+summary(design)
+diagnose_design(design, diagnosands = study_diagnosands)
+```
+
